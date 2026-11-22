@@ -3,6 +3,7 @@
   "installCommand": "npm ci && npm --prefix admin-ui ci",
   "buildCommand": "npx prisma generate && npm run build && npm run build:client",
   "outputDirectory": "admin-ui/dist",
+  "redirects": [{ "source": "/", "destination": "/admin", "permanent": false }],
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api" },
     { "source": "/:companySlug/:secret/iclock/:path*", "destination": "/api" },
