@@ -48,10 +48,27 @@ export default function DeviceCommandsDrawer({ deviceId, serialNumber, onClose }
     }
   }
 
+  async function syncNames() {
+    setCommandError(null);
+    setSendingCommand(true);
+    try {
+      await api.sendDeviceCommand(deviceId, "DATA QUERY USERINFO");
+      loadCommands();
+    } catch (err) {
+      setCommandError(err instanceof ApiError ? err.message : "Failed to request employee names");
+    } finally {
+      setSendingCommand(false);
+    }
+  }
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-drawer" onClick={(e) => e.stopPropagation()}>
         <h3>Commands: {serialNumber}</h3>
+        <button className="btn btn-primary" onClick={syncNames} disabled={sendingCommand}>
+          Sync employee names
+        </button>
+        <p className="muted">Requests the employee list on the next device connection. Requires USERINFO query support in the device firmware.</p>
         <div className="field">
           <label>Send raw ADMS command</label>
           <div className="muted" style={{ marginBottom: 6 }}>

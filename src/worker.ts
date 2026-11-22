@@ -197,10 +197,21 @@ function shutdown(signal: string) {
   stopping = true;
 }
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+// A bounded batch can run inside a Vercel request. Claims are leased in
+// Postgres, so overlapping scheduled invocations cannot claim the same row.
+export async function runScheduledWorker() {
+  const settings = await getOrCreatePlatformSettings(prisma);
+  const ids = await claimBatch(5);
+  await Promise.all(ids.map((id) => processPunchRecord(id, settings.webhookMaxAttempts, Math.min(settings.webhookTimeoutMs, 15000))));
+  await runRetentionSweepIfDue();
+  return { processed: ids.length };
+}
 
-main().catch((err) => {
-  logger.error({ err }, "worker crashed");
-  process.exit(1);
-});
+if (require.main === module) {
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  main().catch((err) => {
+    logger.error({ err }, "worker crashed");
+    process.exit(1);
+  });
+}

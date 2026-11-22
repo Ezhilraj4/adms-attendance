@@ -63,7 +63,7 @@ function serializeRecord<
     webhookHeld: boolean;
     device: DeviceWebhookInfo & { id: string; serialNumber: string; label: string | null; companyId: string };
   }
->(record: T, maxAttempts: number) {
+>(record: T, maxAttempts: number, employeeName: string | null = null) {
   const { device, ...rest } = record;
   return {
     ...rest,
@@ -72,6 +72,7 @@ function serializeRecord<
     // is a genuine dead end (queued but never claimed by the worker) with
     // no active webhook on the device, regardless of what status is shown.
     canRetry: hasActiveWebhook(device),
+    employeeName,
     device: { id: device.id, serialNumber: device.serialNumber, label: device.label, companyId: device.companyId },
   };
 }
@@ -146,12 +147,19 @@ async function buildScopedWhere(req: import("express").Request, extra: Prisma.Pu
   const scope = resolveCompanyScope(req, parsed.data.companyId);
 
   const conditions: Prisma.PunchRecordWhereInput[] = [extra, statusCondition(parsed.data.status, maxAttempts)];
+  const matchingEmployees = parsed.data.search ? await prisma.employee.findMany({
+    where: {
+      ...(!scope.all ? { companyId: scope.companyId } : {}),
+      name: { contains: parsed.data.search, mode: "insensitive" },
+    },
+    select: { companyId: true, pin: true },
+  }) : [];
   const searchCondition = buildSearch<Prisma.PunchRecordWhereInput>(parsed.data.search, [
     (t) => ({ devicePin: t }),
     (t) => ({ device: { serialNumber: t } }),
     (t) => ({ device: { label: t } }),
   ]);
-  if (searchCondition) conditions.push(searchCondition);
+  if (searchCondition) conditions.push({ OR: [searchCondition, ...matchingEmployees.map((e) => ({ device: { companyId: e.companyId }, devicePin: e.pin }))] });
   if (!scope.all) conditions.push({ device: { companyId: scope.companyId } });
   if (parsed.data.deviceId) conditions.push({ deviceId: parsed.data.deviceId });
   if (parsed.data.from || parsed.data.to) {
@@ -192,8 +200,12 @@ punchRecordsRouter.get("/", async (req, res) => {
     }),
     prisma.punchRecord.count({ where }),
   ]);
-
-  res.json({ records: records.map((r) => serializeRecord(r, settings.webhookMaxAttempts)), total, page, pageSize });
+  const employees = await prisma.employee.findMany({
+    where: { companyId: { in: [...new Set(records.map((r) => r.device.companyId))] }, pin: { in: [...new Set(records.map((r) => r.devicePin))] } },
+    select: { companyId: true, pin: true, name: true },
+  });
+  const names = new Map(employees.map((e) => [`${e.companyId}:${e.pin}`, e.name]));
+  res.json({ records: records.map((r) => serializeRecord(r, settings.webhookMaxAttempts, names.get(`${r.device.companyId}:${r.devicePin}`) ?? null)), total, page, pageSize });
 });
 
 // Dedicated failed-webhooks view: retries exhausted OR most recent attempt errored.
@@ -226,7 +238,12 @@ punchRecordsRouter.get("/failed", async (req, res) => {
     prisma.punchRecord.count({ where }),
   ]);
 
-  res.json({ records: records.map((r) => serializeRecord(r, settings.webhookMaxAttempts)), total, page, pageSize });
+  const employees = await prisma.employee.findMany({
+    where: { companyId: { in: [...new Set(records.map((r) => r.device.companyId))] }, pin: { in: [...new Set(records.map((r) => r.devicePin))] } },
+    select: { companyId: true, pin: true, name: true },
+  });
+  const names = new Map(employees.map((e) => [`${e.companyId}:${e.pin}`, e.name]));
+  res.json({ records: records.map((r) => serializeRecord(r, settings.webhookMaxAttempts, names.get(`${r.device.companyId}:${r.devicePin}`) ?? null)), total, page, pageSize });
 });
 
 async function assertVisible(req: import("express").Request, punchRecordId: string) {
@@ -273,7 +290,10 @@ punchRecordsRouter.get("/:id/deliveries", async (req, res) => {
     getOrCreatePlatformSettings(prisma),
   ]);
 
-  res.json({ punchRecord: serializeRecord(record, settings.webhookMaxAttempts), deliveries, total, page, pageSize });
+  const employee = await prisma.employee.findUnique({
+    where: { companyId_pin: { companyId: record.device.companyId, pin: record.devicePin } },
+  });
+  res.json({ punchRecord: serializeRecord(record, settings.webhookMaxAttempts, employee?.name ?? null), deliveries, total, page, pageSize });
 });
 
 // Queues a punch record for the worker's next poll: nextAttemptAt = now(),

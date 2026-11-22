@@ -188,6 +188,7 @@ export interface PunchRecord {
   id: string;
   deviceId: string;
   devicePin: string;
+  employeeName: string | null;
   punchTime: string;
   punchTimeUtc: string | null;
   status: number;

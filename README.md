@@ -64,6 +64,45 @@ That's it — punches now show up in **Punch Records** and flow to your webhook.
 - Best-effort service, **no uptime guarantee**. Need more control? Self-host
   it — same software, no differences.
 
+## Vercel deployment
+
+This repository includes Vercel configuration for the admin UI, admin API,
+and device-facing ADMS routes. Create a Vercel project from this repository
+and add these environment variables:
+
+```text
+DATABASE_URL=your-postgres-connection-string
+JWT_SECRET=a-long-random-secret
+ADMIN_BOOTSTRAP_EMAIL=admin@example.com
+ADMIN_BOOTSTRAP_PASSWORD=change-me-immediately
+```
+
+Run the Prisma migration once against the production database:
+
+```bash
+npx prisma migrate deploy
+```
+
+Vercel Functions are request-based. Set a strong `CRON_SECRET`, then use a
+trusted scheduler (for example Supabase Cron with pg_net) to call
+`GET /api/internal/worker` once per minute with the header
+`Authorization: Bearer <CRON_SECRET>`. Each call processes at most five queued
+webhooks concurrently, with a 15-second timeout per delivery, and checks for
+expired data. Higher attendance volumes require a more frequent scheduler or
+the existing standalone worker. Scheduling is configured separately; the
+repository does not start a continuous worker on Vercel.
+
+Names are read from `USERINFO` uploads and `USER` records in `OPERLOG` uploads.
+Use **Devices → Commands → Sync employee names** to request the employee list
+on supported firmware. Names are matched by company and PIN, so devices in the
+same company must use consistent PINs. Unknown names display the PIN. Real
+hardware compatibility still depends on the device model and firmware.
+
+For Supabase, use a private `adms` schema and a dedicated database login. The
+runtime connection should use the transaction pooler with `pgbouncer=true`,
+`schema=adms`, `sslmode=require`, and a small `connection_limit`. Use a direct
+connection or session pooler for migrations. Never commit database credentials.
+
 ## Legal notice and disclaimer
 
 - **Independent project.** This software is not affiliated with, endorsed by,

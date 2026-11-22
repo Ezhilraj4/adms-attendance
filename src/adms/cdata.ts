@@ -4,6 +4,7 @@ import { prisma } from "../db/client";
 import { deviceLogger } from "../logger";
 import { resolveDevice, sendRejected, sendUnclaimed, touchDevice } from "./deviceLookup";
 import { parseAttlogBody } from "./parsers/attlog";
+import { parseUserinfoBody } from "./parsers/userinfo";
 import { logDeviceRawData } from "./rawLog";
 import { computeTimeZoneOptionValue, zonedWallClockToUtc } from "./timezone";
 import { classifyDbError } from "./dbErrors";
@@ -185,6 +186,25 @@ async function storeAttlog(
   }
 }
 
+async function storeUserinfo(companyId: string, body: string): Promise<StoreResult> {
+  const { users, errors } = parseUserinfoBody(body);
+  if (errors.length) deviceLogger.warn({ companyId, count: errors.length }, "invalid USERINFO lines skipped");
+  try {
+    for (const user of users) {
+      await prisma.employee.upsert({
+        where: { companyId_pin: { companyId, pin: user.pin } },
+        create: { companyId, pin: user.pin, name: user.name },
+        update: { name: user.name },
+      });
+    }
+    deviceLogger.info({ companyId, received: users.length, parseErrors: errors.length }, "USERINFO batch processed");
+    return { stored: true };
+  } catch (err) {
+    deviceLogger.error({ err, companyId }, "failed to store USERINFO batch");
+    return { stored: false };
+  }
+}
+
 // POST /iclock/cdata?SN=...&table=ATTLOG|OPERLOG|... - punch/data push.
 export async function handleCdataPost(req: Request, res: Response) {
   const sn = String(req.query.SN ?? "");
@@ -215,8 +235,12 @@ export async function handleCdataPost(req: Request, res: Response) {
   if (table === "ATTLOG") {
     const hasWebhook = Boolean(device.webhookEnabled && device.webhookUrl);
     result = await storeAttlog(device.id, hasWebhook, device.timezone, body);
+  } else if (table === "USERINFO" || table === "OPERLOG") {
+    const userBody = table === "OPERLOG" ? body.split(/\r?\n/).filter((line) => /^USER\s/i.test(line)).join("\n") : body;
+    result = await storeUserinfo(device.companyId, userBody);
+    if (result.stored) await logDeviceRawData(req, device.id, table, body);
   } else {
-    // OPERLOG / USERINFO / FINGERTMP / FACE / photos / anything else -
+    // OPERLOG / FINGERTMP / FACE / photos / anything else -
     // captured verbatim so it's browsable per-device in the admin panel's
     // Raw Data Dump instead of only living in the process logs.
     deviceLogger.info({ deviceId: device.id, table, bodyLength: body.length }, "non-ATTLOG table push received");

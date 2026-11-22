@@ -72,7 +72,7 @@ export default function DeliveryLogDrawer({ punchRecordId, onClose }: { punchRec
             {punchRecord && (
               <div className="card">
                 <div>
-                  PIN <strong>{punchRecord.devicePin}</strong> · {formatPunchTime(punchRecord.punchTime)}
+                  <strong>{punchRecord.employeeName ?? `PIN ${punchRecord.devicePin}`}</strong> · {formatPunchTime(punchRecord.punchTime)}
                 </div>
                 <div className="muted">
                   Device: {punchRecord.device?.label ?? punchRecord.device?.serialNumber}

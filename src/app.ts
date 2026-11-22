@@ -9,6 +9,7 @@ import { adminApiRouter } from "./admin/router";
 import { errorHandler } from "./middleware/errorHandler";
 import { prisma } from "./db/client";
 import { config } from "./config";
+import { handleScheduledWorker } from "./admin/scheduledWorker";
 
 // Builds the Express app without binding a port - split out of server.ts so
 // tests (supertest et al.) can exercise the real middleware stack (CORS,
@@ -73,6 +74,7 @@ export function buildApp(): express.Express {
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
 
+  app.get("/api/internal/worker", handleScheduledWorker);
   app.use("/api/admin", adminApiRouter);
 
   // Backend service, not a content site - nothing here is meant to be

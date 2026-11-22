@@ -98,7 +98,7 @@ export default function PunchRecordsTable({ mode }: { mode: "all" | "failed" }) 
   }
 
   const columns: Column<PunchRecord>[] = [
-    { key: "devicePin", header: "PIN", sortable: true, render: (r) => r.devicePin },
+    { key: "employeeName", header: "Employee", sortable: false, render: (r) => r.employeeName ?? `PIN ${r.devicePin}` },
     { key: "device", header: "Device", sortable: true, render: (r) => r.device?.label ?? r.device?.serialNumber },
     {
       key: "punchTime",
@@ -219,7 +219,7 @@ export default function PunchRecordsTable({ mode }: { mode: "all" | "failed" }) 
           emptyMessage="No punch records found."
           searchValue={table.searchInput}
           onSearchChange={table.setSearchInput}
-          searchPlaceholder="Search PIN or device…"
+          searchPlaceholder="Search employee, PIN or device…"
           selection={showCheckboxColumn ? { selected, toggle, toggleAll } : undefined}
         />
       </div>
