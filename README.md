@@ -52,6 +52,27 @@ That's it — punches now show up in **Punch Records** and flow to your webhook.
 
 ## Hosted version
 
+### Daily attendance and shifts
+
+The admin navigation includes **Daily Attendance**, **Employees**, and
+**Attendance Settings**. Employee names synchronize from the device. Assign
+each employee to the 1st or 2nd shift using the buttons on Employees; employees
+default to the 1st shift. Inactive employees are excluded from the report.
+
+Attendance Settings configures both shift start/end times, attendance timezone,
+early/after-shift punch allowances, and late-arrival grace. Overnight shifts
+belong to the date they start. A punch inside the assigned window means present;
+without a punch the status stays pending until the window ends, then becomes
+absent. The report shows first, last and all punch times, with a filtered CSV
+download. One punch does not imply a full working day, and the first-to-last
+span does not subtract breaks or constitute paid hours.
+
+Reports use the current roster, shift assignments and settings, including when
+viewing previous dates. They are calculated from retained punch records;
+expired or pre-enrollment dates without punches show No data rather than absent.
+Absence means no recorded punch, so device outages or delayed uploads can change
+a report when the device reconnects. Existing raw punch records are unchanged.
+
 [adms.adrk.in](https://adms.adrk.in) runs this exact open-source code.
 
 - **Free** for genuine use. Spam/abuse sign-ups are blocked.

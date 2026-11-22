@@ -35,6 +35,7 @@ model Company {
   devices        Device[]
   pendingDevices PendingDevice[]
   employees      Employee[]
+  attendanceSettings AttendanceSettings?
 
   // Datatable sort columns (the Companies page sorts by name / created).
   @@index([name])
@@ -48,12 +49,30 @@ model Employee {
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   pin       String
   name      String
+  shift     Int      @default(1)
+  active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([companyId, pin])
   @@index([companyId])
   @@map("employees")
+}
+
+model AttendanceSettings {
+  companyId String @id
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  timezone String @default("Asia/Kolkata")
+  shift1Start String @default("09:00")
+  shift1End String @default("17:00")
+  shift2Start String @default("17:00")
+  shift2End String @default("01:00")
+  earlyMinutes Int @default(60)
+  afterMinutes Int @default(120)
+  graceMinutes Int @default(15)
+  updatedAt DateTime @updatedAt
+
+  @@map("attendance_settings")
 }
 
 model AdminUser {

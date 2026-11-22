@@ -9,6 +9,7 @@ import { webhookTemplatesRouter } from "./webhookTemplates";
 import { settingsRouter } from "./settings";
 import { requireAdminAuth } from "../middleware/requireAdminAuth";
 import { APP_VERSION } from "../version";
+import { attendanceRouter } from "./attendance";
 
 // Fully separate namespace + middleware stack from /iclock/*. authRouter
 // itself gates /me and /me/password with requireAdminAuth; /login and
@@ -26,6 +27,7 @@ adminApiRouter.use("/companies", requireAdminAuth, companiesRouter);
 adminApiRouter.use("/admin-users", requireAdminAuth, adminUsersRouter);
 adminApiRouter.use("/devices", requireAdminAuth, devicesRouter);
 adminApiRouter.use("/punch-records", requireAdminAuth, punchRecordsRouter);
+adminApiRouter.use("/attendance", requireAdminAuth, attendanceRouter);
 // rawRequestsRouter applies its own requireSuperAdmin internally, on top of
 // requireAdminAuth here.
 adminApiRouter.use("/raw-requests", requireAdminAuth, rawRequestsRouter);

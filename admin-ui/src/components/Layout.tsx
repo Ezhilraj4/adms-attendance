@@ -63,6 +63,9 @@ export default function Layout() {
             <NavLink to="/devices">Devices</NavLink>
             <NavLink to="/unregistered-devices">Unregistered Devices</NavLink>
             <NavLink to="/punch-records">Punch Records</NavLink>
+            <NavLink to="/attendance">Daily Attendance</NavLink>
+            <NavLink to="/employees">Employees</NavLink>
+            <NavLink to="/attendance-settings">Attendance Settings</NavLink>
             <NavLink to="/failed-webhooks">Failed Webhooks</NavLink>
             <NavLink to="/raw-data">Raw Data Dump</NavLink>
             {user.role === "SUPER_ADMIN" && <NavLink to="/raw-requests">Raw Request Log</NavLink>}

@@ -1,5 +1,23 @@
 const BASE = "/api/admin";
 
+export interface AttendanceSettings {
+  timezone: string; shift1Start: string; shift1End: string; shift2Start: string; shift2End: string;
+  earlyMinutes: number; afterMinutes: number; graceMinutes: number;
+}
+export interface AttendanceEmployee { id: string; name: string; pin: string; shift: number; active: boolean }
+export interface DailyAttendanceRow {
+  employeeId: string; name: string; pin: string; shift: number;
+  status: "present" | "absent" | "pending" | "unavailable";
+  firstPunch: string | null; lastPunch: string | null; lateMinutes: number; spanMinutes: number | null;
+  shiftStart: string; shiftEnd: string;
+  punches: { id: string; time: string; device: string; status: number }[];
+}
+export interface DailyAttendanceReport {
+  date: string; timezone: string; rows: DailyAttendanceRow[];
+  summary: { total: number; present: number; absent: number; pending: number; unavailable: number };
+  unknownPins: string[]; retentionDays: number;
+}
+
 export class ApiError extends Error {
   status: number;
   details?: unknown;
@@ -228,6 +246,11 @@ export interface WebhookDelivery {
 }
 
 export const api = {
+  getAttendanceSettings: (companyId: string) => get<{ settings: AttendanceSettings }>(`/attendance/settings${buildQuery({ companyId })}`),
+  updateAttendanceSettings: (companyId: string, data: AttendanceSettings) => patch<{ settings: AttendanceSettings }>(`/attendance/settings${buildQuery({ companyId })}`, data),
+  getEmployees: (companyId: string) => get<{ employees: AttendanceEmployee[] }>(`/attendance/employees${buildQuery({ companyId })}`),
+  updateEmployee: (companyId: string, id: string, data: { shift?: number; active?: boolean }) => patch<{ ok: boolean }>(`/attendance/employees/${id}${buildQuery({ companyId })}`, data),
+  getDailyAttendance: (companyId: string, date?: string) => get<DailyAttendanceReport>(`/attendance/daily${buildQuery({ companyId, date })}`),
   login: (email: string, password: string) => post<{ user: AdminUserSummary }>("/auth/login", { email, password }),
   // Public - no session required.
   getSignupStatus: () => get<{ signupsEnabled: boolean }>("/auth/signup-status"),

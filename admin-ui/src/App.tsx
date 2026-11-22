@@ -14,6 +14,7 @@ import RawRequestLogPage from "./pages/RawRequestLogPage";
 import Settings from "./pages/Settings";
 import RequireSuperAdmin from "./components/RequireSuperAdmin";
 import { useAuth } from "./context/AuthContext";
+import { DailyAttendance, Employees, AttendanceSettings } from "./pages/Attendance";
 
 export default function App() {
   const { user } = useAuth();
@@ -29,6 +30,9 @@ export default function App() {
         <Route path="devices" element={<Devices />} />
         <Route path="unregistered-devices" element={<UnregisteredDevices />} />
         <Route path="punch-records" element={<PunchRecords />} />
+        <Route path="attendance" element={<DailyAttendance />} />
+        <Route path="employees" element={<Employees />} />
+        <Route path="attendance-settings" element={<AttendanceSettings />} />
         <Route path="failed-webhooks" element={<FailedWebhooks />} />
         <Route path="admin-users" element={<AdminUsers />} />
         <Route path="raw-data" element={<RawDataDump />} />
