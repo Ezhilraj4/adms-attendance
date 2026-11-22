@@ -15,6 +15,7 @@ import Settings from "./pages/Settings";
 import RequireSuperAdmin from "./components/RequireSuperAdmin";
 import { useAuth } from "./context/AuthContext";
 import { DailyAttendance, Employees, AttendanceSettings } from "./pages/Attendance";
+import MonthlyAttendance from "./pages/MonthlyAttendance";
 
 export default function App() {
   const { user } = useAuth();
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="unregistered-devices" element={<UnregisteredDevices />} />
         <Route path="punch-records" element={<PunchRecords />} />
         <Route path="attendance" element={<DailyAttendance />} />
+        <Route path="attendance-monthly" element={<MonthlyAttendance />} />
         <Route path="employees" element={<Employees />} />
         <Route path="attendance-settings" element={<AttendanceSettings />} />
         <Route path="failed-webhooks" element={<FailedWebhooks />} />

@@ -36,6 +36,8 @@ model Company {
   pendingDevices PendingDevice[]
   employees      Employee[]
   attendanceSettings AttendanceSettings?
+  attendanceSettingVersions AttendanceSettingVersion[]
+  attendanceArchiveState AttendanceArchiveState?
 
   // Datatable sort columns (the Companies page sorts by name / created).
   @@index([name])
@@ -54,9 +56,68 @@ model Employee {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  assignments EmployeeAssignment[]
+  duties EmployeeDuty[]
+  attendanceDays AttendanceDay[]
+
   @@unique([companyId, pin])
   @@index([companyId])
   @@map("employees")
+}
+
+model EmployeeAssignment {
+  id String @id @default(cuid())
+  employeeId String
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  effectiveFrom String
+  shift Int
+  active Boolean
+  createdAt DateTime @default(now())
+  @@unique([employeeId, effectiveFrom])
+  @@map("employee_assignments")
+}
+
+model AttendanceArchiveState {
+  companyId String @id
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  checkedAt DateTime @default(now())
+  @@map("attendance_archive_state")
+}
+
+model EmployeeDuty {
+  id String @id @default(cuid())
+  employeeId String
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date String
+  kind String
+  note String @default("")
+  approvedOvertimeMinutes Int?
+  updatedAt DateTime @updatedAt
+  @@unique([employeeId, date])
+  @@map("employee_duties")
+}
+
+model AttendanceDay {
+  id String @id @default(cuid())
+  employeeId String
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date String
+  data Json
+  updatedAt DateTime @updatedAt
+  @@unique([employeeId, date])
+  @@index([date])
+  @@map("attendance_days")
+}
+
+model AttendanceSettingVersion {
+  id String @id @default(cuid())
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  effectiveFrom String
+  config Json
+  createdAt DateTime @default(now())
+  @@unique([companyId, effectiveFrom])
+  @@map("attendance_setting_versions")
 }
 
 model AttendanceSettings {
@@ -70,6 +131,10 @@ model AttendanceSettings {
   earlyMinutes Int @default(60)
   afterMinutes Int @default(120)
   graceMinutes Int @default(15)
+  overtimeThresholdMinutes Int @default(30)
+  maxOvertimeMinutes Int @default(480)
+  doubleShiftMinMinutes Int @default(240)
+  overtimeMode String @default("paired")
   updatedAt DateTime @updatedAt
 
   @@map("attendance_settings")

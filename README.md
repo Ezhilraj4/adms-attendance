@@ -54,24 +54,35 @@ That's it — punches now show up in **Punch Records** and flow to your webhook.
 
 ### Daily attendance and shifts
 
-The admin navigation includes **Daily Attendance**, **Employees**, and
-**Attendance Settings**. Employee names synchronize from the device. Assign
-each employee to the 1st or 2nd shift using the buttons on Employees; employees
-default to the 1st shift. Inactive employees are excluded from the report.
+The navigation includes **Daily Attendance**, **Monthly Reports**, **Employees**,
+and **Attendance Settings**. Any recorded punch in the shop workday counts as
+Present, including late arrivals and employees covering the other shift. Without
+a punch, a date stays Pending until the last shop shift ends, then becomes
+Leave — no punch. Planned leave and days off can be entered explicitly. Missing
+pre-enrollment or expired historical data remains No data, never automatic leave.
+The workday starts at the earliest shift start minus its early-arrival allowance
+and ends at the next workday boundary, so overnight punches are not counted twice.
 
-Attendance Settings configures both shift start/end times, attendance timezone,
-early/after-shift punch allowances, and late-arrival grace. Overnight shifts
-belong to the date they start. A punch inside the assigned window means present;
-without a punch the status stays pending until the window ends, then becomes
-absent. The report shows first, last and all punch times, with a filtered CSV
-download. One punch does not imply a full working day, and the first-to-last
-span does not subtract breaks or constitute paid hours.
+Monthly reports include each person's worked/leave/pending days, recorded hours,
+estimated and approved overtime, changed duties, double duties and review flags.
+Every count opens that person's dates with all punch times. Summary and detail
+CSV downloads are available. Duty changes, double duty, leave/off days, notes and
+overtime approval can be saved per date. Regular assignments and working-time
+rules have effective dates so later changes do not rewrite earlier schedules.
 
-Reports use the current roster, shift assignments and settings, including when
-viewing previous dates. They are calculated from retained punch records;
-expired or pre-enrollment dates without punches show No data rather than absent.
-Absence means no recorded punch, so device outages or delayed uploads can change
-a report when the device reconnects. Existing raw punch records are unchanged.
+IN/OUT pairs exclude recorded breaks. If firmware only supplies generic punches,
+first/last spans are marked estimated; one punch cannot prove worked hours.
+Other-shift and double-duty detections are transparent suggestions with review
+flags. They do not silently change the regular roster. Overtime is time after
+the applicable duty end, subject to adjustable minimum and maximum thresholds;
+approved minutes are stored separately. These measurements are attendance
+evidence, not an automatic payroll calculation.
+
+Completed day snapshots preserve punch times and totals beyond raw-log retention.
+The scheduled worker archives recent closed days, and reports refresh archives
+when late uploads or dated corrections arrive. The feature cannot reconstruct
+records deleted before it was enabled. Device outages and delayed uploads can
+still change a no-punch day when attendance data finally arrives.
 
 [adms.adrk.in](https://adms.adrk.in) runs this exact open-source code.
 

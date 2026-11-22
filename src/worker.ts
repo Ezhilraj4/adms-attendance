@@ -8,6 +8,7 @@ import { appLogger as logger } from "./logger";
 import { dispatchPunchWebhook } from "./webhooks/dispatcher";
 import { runRetentionSweep } from "./retentionSweep";
 import { getOrCreatePlatformSettings } from "./utils/retention";
+import { archiveRecentAttendance } from "./attendance/report";
 
 // Backoff schedule indexed by attempt number (1-based): 30s, 2m, 10m, 1h, 6h.
 const BACKOFF_SCHEDULE_MS = [30_000, 120_000, 600_000, 3_600_000, 21_600_000];
@@ -130,9 +131,10 @@ async function processPunchRecord(id: string, webhookMaxAttempts: number, webhoo
 const RETENTION_SWEEP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 let nextRetentionSweepAt = 0; // due immediately on the very first tick
 
-async function runRetentionSweepIfDue() {
+async function runRetentionSweepIfDue(archive = true) {
   if (Date.now() < nextRetentionSweepAt) return;
   nextRetentionSweepAt = Date.now() + RETENTION_SWEEP_INTERVAL_MS;
+  if (archive) await archiveRecentAttendance();
   await runRetentionSweep();
 }
 
@@ -203,7 +205,8 @@ export async function runScheduledWorker() {
   const settings = await getOrCreatePlatformSettings(prisma);
   const ids = await claimBatch(5);
   await Promise.all(ids.map((id) => processPunchRecord(id, settings.webhookMaxAttempts, Math.min(settings.webhookTimeoutMs, 15000))));
-  await runRetentionSweepIfDue();
+  await archiveRecentAttendance();
+  await runRetentionSweepIfDue(false);
   return { processed: ids.length };
 }
 

@@ -10,7 +10,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { TIMEZONE_OPTIONS } from "../utils/timezoneOptions";
 
-function useCompany(disabled = false) {
+export function useCompany(disabled = false) {
   const { user } = useAuth();
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [companyId, setCompanyId] = useState(user?.companyId ?? "");
@@ -40,7 +40,7 @@ function useCompany(disabled = false) {
           <label htmlFor="attendance-company">Company</label>
           <select
             id="attendance-company"
-          disabled={disabled}
+            disabled={disabled}
             value={companyId}
             onChange={(e) => setCompanyId(e.target.value)}
           >
@@ -62,6 +62,8 @@ export function Employees() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [effectiveFrom, setEffectiveFrom] = useState("");
+  const [savedAssignment, setSavedAssignment] = useState(false);
   useEffect(() => {
     if (!scope.companyId) return;
     let current = true;
@@ -90,10 +92,12 @@ export function Employees() {
     setBusy(employee.id);
     setError("");
     try {
-      await api.updateEmployee(scope.companyId, employee.id, change);
-      setEmployees((all) =>
-        all.map((e) => (e.id === employee.id ? { ...e, ...change } : e)),
-      );
+      await api.updateEmployee(scope.companyId, employee.id, {
+        ...change,
+        effectiveFrom: effectiveFrom || undefined,
+      });
+      setEmployees((await api.getEmployees(scope.companyId)).employees);
+      setSavedAssignment(true);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -113,6 +117,21 @@ export function Employees() {
       <div className="filters">
         {scope.picker}
         <div className="field">
+          <label htmlFor="assignment-date">
+            Assignment effective from (blank = today)
+          </label>
+          <input
+            id="assignment-date"
+            type="date"
+            value={effectiveFrom}
+            disabled={!!busy}
+            onChange={(e) => {
+              setEffectiveFrom(e.target.value);
+              setSavedAssignment(false);
+            }}
+          />
+        </div>
+        <div className="field">
           <label htmlFor="employee-search">Search employees</label>
           <input
             id="employee-search"
@@ -129,6 +148,12 @@ export function Employees() {
         </div>
       )}
       <div className="card table-wrap">
+        {savedAssignment && (
+          <p role="status">
+            Assignment saved. Future changes start on the selected date; earlier
+            attendance stays unchanged.
+          </p>
+        )}
         <table>
           <thead>
             <tr>
@@ -136,6 +161,7 @@ export function Employees() {
               <th>PIN</th>
               <th>Shift</th>
               <th>Include in attendance</th>
+              <th>Report</th>
             </tr>
           </thead>
           <tbody>
@@ -176,11 +202,16 @@ export function Employees() {
                     {e.active ? "Active" : "Inactive"}
                   </label>
                 </td>
+                <td>
+                  <Link to={`/attendance-monthly?employeeId=${e.id}`}>
+                    View details
+                  </Link>
+                </td>
               </tr>
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={4}>
+                <td colSpan={5}>
                   {loading && scope.companyId
                     ? "Loading…"
                     : "No employees found. Use Devices → Commands → Sync employee names first."}
@@ -200,6 +231,7 @@ export function AttendanceSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [effectiveFrom, setEffectiveFrom] = useState("");
   useEffect(() => {
     if (!scope.companyId) return;
     let current = true;
@@ -229,10 +261,10 @@ export function AttendanceSettings() {
     setError("");
     setSaved(false);
     try {
-      const result = await api.updateAttendanceSettings(
-        scope.companyId,
-        settings,
-      );
+      const result = await api.updateAttendanceSettings(scope.companyId, {
+        ...settings,
+        effectiveFrom: effectiveFrom || undefined,
+      });
       setSettings(result.settings);
       setSaved(true);
     } catch (e) {
@@ -257,13 +289,30 @@ export function AttendanceSettings() {
       {settings && (
         <form onSubmit={save}>
           <fieldset disabled={saving} className="attendance-form">
+            <div className="card field">
+              <label htmlFor="settings-effective-date">
+                Settings effective from (blank = today)
+              </label>
+              <input
+                id="settings-effective-date"
+                type="date"
+                value={effectiveFrom}
+                onChange={(e) => {
+                  setEffectiveFrom(e.target.value);
+                  setSaved(false);
+                }}
+              />
+              <p className="muted">
+                Earlier dates keep their saved working-time rules.
+              </p>
+            </div>
             <div className="card">
               <div className="field">
                 <label htmlFor="attendance-timezone">Attendance timezone</label>
                 <select
                   id="attendance-timezone"
                   value={settings.timezone}
-              onChange={(e) => edit("timezone", e.target.value)}
+                  onChange={(e) => edit("timezone", e.target.value)}
                 >
                   {!TIMEZONE_OPTIONS.some(
                     (t) => t.tz === settings.timezone,
@@ -332,12 +381,8 @@ export function AttendanceSettings() {
                   [
                     {
                       key: "earlyMinutes",
-                      label: "Accept punches before start (minutes)",
-                      max: 360,
-                    },
-                    {
-                      key: "afterMinutes",
-                      label: "Accept punches after end (minutes)",
+                      label:
+                        "Shop day starts this many minutes before the earliest shift",
                       max: 360,
                     },
                     {
@@ -362,9 +407,78 @@ export function AttendanceSettings() {
                 ))}
               </div>
               <p className="muted">
-                No punch is marked absent only after the shift and its after-end
-                allowance have finished. These settings and current employee
-                assignments recalculate historical reports too.
+                No punch stays Pending until the full shop working day
+                (including night shift) ends, then becomes Leave — no punch.
+                Late arrivals and covering another shift still count as Present.
+              </p>
+            </div>
+            <div className="card">
+              <h3>Overtime and duty detection</h3>
+              <div className="filters">
+                {(
+                  [
+                    {
+                      key: "overtimeThresholdMinutes",
+                      label: "Minimum overtime (minutes)",
+                      min: 0,
+                      max: 240,
+                    },
+                    {
+                      key: "maxOvertimeMinutes",
+                      label: "Maximum estimated overtime per day (minutes)",
+                      min: 0,
+                      max: 720,
+                    },
+                    {
+                      key: "doubleShiftMinMinutes",
+                      label:
+                        "Minimum coverage in each shift to detect double duty (minutes)",
+                      min: 30,
+                      max: 720,
+                    },
+                  ] as const
+                ).map((f) => (
+                  <div className="field" key={f.key}>
+                    <label htmlFor={f.key}>{f.label}</label>
+                    <input
+                      id={f.key}
+                      type="number"
+                      min={f.min}
+                      max={f.max}
+                      required
+                      value={
+                        settings[f.key] ??
+                        (f.key === "overtimeThresholdMinutes"
+                          ? 30
+                          : f.key === "maxOvertimeMinutes"
+                            ? 480
+                            : 240)
+                      }
+                      onChange={(e) => edit(f.key, Number(e.target.value))}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="field">
+                <label htmlFor="overtime-mode">Worked time calculation</label>
+                <select
+                  id="overtime-mode"
+                  value={settings.overtimeMode ?? "paired"}
+                  onChange={(e) =>
+                    edit("overtimeMode", e.target.value as "paired" | "span")
+                  }
+                >
+                  <option value="paired">
+                    Use IN/OUT pairs; exclude recorded breaks
+                  </option>
+                  <option value="span">
+                    First punch to last punch; includes breaks
+                  </option>
+                </select>
+              </div>
+              <p className="muted">
+                Unclear punches are flagged. Estimated overtime is separate from
+                approved overtime in each employee's monthly details.
               </p>
             </div>
             <button className="btn btn-primary" disabled={saving}>
@@ -378,11 +492,14 @@ export function AttendanceSettings() {
   );
 }
 
-const statusLabel = {
+export const statusLabel = {
   present: "Present",
   absent: "Absent (no punch)",
   pending: "Pending",
   unavailable: "No data",
+  off: "Day off",
+  leave: "Leave — no punch",
+  inactive: "Inactive",
 };
 export function DailyAttendance() {
   const scope = useCompany();
@@ -521,7 +638,14 @@ export function DailyAttendance() {
         <>
           <div className="attendance-summary">
             {(
-              ["total", "present", "absent", "pending", "unavailable"] as const
+              [
+                "total",
+                "present",
+                "leave",
+                "pending",
+                "off",
+                "unavailable",
+              ] as const
             ).map((key) => (
               <div className="card" key={key}>
                 <span className="muted">
@@ -533,8 +657,10 @@ export function DailyAttendance() {
           </div>
           <p className="muted">
             Times in {report.timezone}. The date is the day the shift starts.
-            Records are retained for {report.retentionDays} days; older or
-            pre-enrollment dates show “No data”.
+            No-punch days stay Pending until the shop's last shift ends, then
+            become Leave. Monthly summaries keep archived days beyond the{" "}
+            {report.retentionDays}-day raw-log period; missing earlier data
+            remains “No data”.
           </p>
           {!!report.unknownPins.length && (
             <p role="status">
@@ -602,9 +728,26 @@ export function DailyAttendance() {
                 <td>
                   <strong>{r.name}</strong>
                   <div className="muted">PIN {r.pin}</div>
+                  <Link
+                    to={`/attendance-monthly?employeeId=${r.employeeId}&month=${report?.date.slice(0, 7)}`}
+                  >
+                    View full details
+                  </Link>
                 </td>
                 <td>
-                  {r.shift === 1 ? "1st shift" : "2nd shift"}
+                  {r.dutyKind === "DOUBLE"
+                    ? "Double shift"
+                    : r.dutyKind === "OFF"
+                      ? "Day off"
+                      : r.dutyKind === "LEAVE"
+                        ? "Leave"
+                        : r.shift === 1
+                          ? "1st shift"
+                          : "2nd shift"}
+                  {r.detectedShift && (
+                    <div>Covered shift {r.detectedShift}</div>
+                  )}
+                  {r.possibleDoubleShift && <div>Double duty detected</div>}
                   <div className="muted">
                     {format(r.shiftStart)} → {format(r.shiftEnd)}
                   </div>
@@ -613,6 +756,7 @@ export function DailyAttendance() {
                   <span className={`badge attendance-${r.status}`}>
                     {statusLabel[r.status]}
                   </span>
+                  {!r.finalized && <div className="muted">Day still open</div>}
                 </td>
                 <td>{format(r.firstPunch)}</td>
                 <td>{format(r.lastPunch)}</td>

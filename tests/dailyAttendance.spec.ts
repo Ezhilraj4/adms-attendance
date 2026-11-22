@@ -13,9 +13,9 @@ describe("daily shift attendance", () => {
     const r = summarizeDay([w.start, w.end], w, 15, new Date("2026-11-24"), false);
     expect(r.status).toBe("present"); expect(r.spanMinutes).toBe(480);
   });
-  it("waits through the departure allowance before marking absent", () => {
+  it("does not finalize the basic shift before its scheduled end", () => {
     const w = shiftWindow("2026-11-22", 1, settings);
-    expect(summarizeDay([], w, 15, w.end, false).status).toBe("pending");
+    expect(summarizeDay([], w, 15, new Date(w.end.getTime() - 1), false).status).toBe("pending");
     expect(summarizeDay([], w, 15, w.to, false).status).toBe("absent");
   });
   it("excludes out-of-window punches and reports grace-adjusted lateness", () => {

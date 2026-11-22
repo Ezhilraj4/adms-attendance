@@ -488,3 +488,11 @@ code.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12
 .attendance-absent { background: #fee2e2; color: #991b1b; }
 .attendance-pending { background: #fef3c7; color: #92400e; }
 .attendance-unavailable { background: #e5e7eb; color: #374151; }
+.attendance-leave { background: #fee2e2; color: #991b1b; }
+.attendance-off, .attendance-inactive { background: var(--neutral-tint); color: var(--text-muted); }
+.count-link { border: 0; background: transparent; color: var(--accent); cursor: pointer; padding: 4px; text-decoration: underline; font: inherit; }
+.count-link:focus-visible, .count-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.count-card { text-align: left; color: var(--text); cursor: pointer; border: 1px solid var(--border); }
+.count-card[aria-pressed="true"] { border-color: var(--accent); }
+.employee-detail { margin-top: 20px; }
+.attendance-notes { min-width: 220px; max-width: 400px; white-space: normal; }

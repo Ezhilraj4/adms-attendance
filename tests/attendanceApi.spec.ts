@@ -28,9 +28,9 @@ describe("attendance API", () => {
   it("requires authentication", async () => { await request(app).get("/api/admin/attendance/daily").expect(401); });
   it("shows present, absent, all times, and overnight punches without inactive employees", async () => {
     const r = await request(app).get(`/api/admin/attendance/daily?date=${day}`).set("Cookie", cookie).expect(200);
-    expect(r.body.summary).toMatchObject({ total: 3, present: 2, absent: 1 });
+    expect(r.body.summary).toMatchObject({ total: 3, present: 2, leave: 1 });
     expect(r.body.rows.find((e: any) => e.pin === "2").punches).toHaveLength(2);
-    expect(r.body.rows.find((e: any) => e.pin === "3").status).toBe("absent");
+    expect(r.body.rows.find((e: any) => e.pin === "3").status).toBe("leave");
     expect(r.body.rows.some((e: any) => e.name === "Other company")).toBe(false);
   });
   it("does not let a query parameter cross company boundaries", async () => {

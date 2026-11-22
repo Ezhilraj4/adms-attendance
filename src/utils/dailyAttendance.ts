@@ -9,6 +9,10 @@ export interface ShiftSettings {
   earlyMinutes: number;
   afterMinutes: number;
   graceMinutes: number;
+  overtimeThresholdMinutes?: number;
+  maxOvertimeMinutes?: number;
+  doubleShiftMinMinutes?: number;
+  overtimeMode?: string;
 }
 
 export function shiftWindow(
@@ -48,7 +52,7 @@ export function summarizeDay(
       ? "present"
       : unavailable
         ? "unavailable"
-        : now < window.to
+        : now < window.end
           ? "pending"
           : "absent",
     firstPunch: first?.toISOString() ?? null,

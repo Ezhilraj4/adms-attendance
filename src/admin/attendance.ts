@@ -2,13 +2,15 @@ import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { prisma } from "../db/client";
 import { resolveCompanyScope } from "../middleware/requireAdminAuth";
+import { isValidTimeZone } from "../adms/timezone";
 import {
-  isValidTimeZone,
-  zonedWallClockNow,
-  zonedWallClockToUtc,
-} from "../adms/timezone";
-import { shiftWindow, summarizeDay } from "../utils/dailyAttendance";
-import { getOrCreatePlatformSettings } from "../utils/retention";
+  attendanceRows,
+  settingsFor,
+  settingsAt,
+  localDate,
+  validDate,
+  summarizeMonth,
+} from "../attendance/report";
 
 export const attendanceRouter = Router();
 // Express 4 needs explicit rejection forwarding for all asynchronous routes.
@@ -28,12 +30,7 @@ function companyScope(req: Request, res: Response): string | null {
   }
   return scope.companyId;
 }
-const settingsFor = (companyId: string) =>
-  prisma.attendanceSettings.upsert({
-    where: { companyId },
-    create: { companyId },
-    update: {},
-  });
+const dateSchema = z.string().refine(validDate, "Choose a valid date");
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const settingsSchema = z
   .object({
@@ -45,6 +42,11 @@ const settingsSchema = z
     earlyMinutes: z.number().int().min(0).max(360),
     afterMinutes: z.number().int().min(0).max(360),
     graceMinutes: z.number().int().min(0).max(180),
+    overtimeThresholdMinutes: z.number().int().min(0).max(240).default(30),
+    maxOvertimeMinutes: z.number().int().min(0).max(720).default(480),
+    doubleShiftMinMinutes: z.number().int().min(30).max(720).default(240),
+    overtimeMode: z.enum(["paired", "span"]).default("paired"),
+    effectiveFrom: dateSchema.optional(),
   })
   .superRefine((s, ctx) => {
     const minutes = (v: string) =>
@@ -73,7 +75,19 @@ attendanceRouter.get(
       res.status(404).json({ error: "Company not found" });
       return;
     }
-    res.json({ settings: await settingsFor(companyId) });
+    const base = await settingsFor(companyId);
+    const date =
+      typeof req.query.date === "string"
+        ? req.query.date
+        : localDate(base.timezone);
+    if (!validDate(date)) {
+      res.status(400).json({ error: "Choose a valid date" });
+      return;
+    }
+    res.json({
+      settings: await settingsAt(companyId, date),
+      effectiveFrom: date,
+    });
   }),
 );
 attendanceRouter.patch(
@@ -90,13 +104,33 @@ attendanceRouter.patch(
       res.status(404).json({ error: "Company not found" });
       return;
     }
-    res.json({
-      settings: await prisma.attendanceSettings.upsert({
-        where: { companyId },
-        create: { companyId, ...parsed.data },
-        update: parsed.data,
-      }),
+    const old = await settingsFor(companyId);
+    const { effectiveFrom: requested, ...config } = parsed.data;
+    const effectiveFrom = requested ?? localDate(old.timezone);
+    await prisma.$transaction(async (tx) => {
+      await tx.attendanceSettingVersion.upsert({
+        where: {
+          companyId_effectiveFrom: { companyId, effectiveFrom: "0001-01-01" },
+        },
+        create: {
+          companyId,
+          effectiveFrom: "0001-01-01",
+          config: JSON.parse(JSON.stringify(old)),
+        },
+        update: {},
+      });
+      await tx.attendanceSettingVersion.upsert({
+        where: { companyId_effectiveFrom: { companyId, effectiveFrom } },
+        create: { companyId, effectiveFrom, config },
+        update: { config },
+      });
     });
+    const current = await settingsAt(companyId, localDate(config.timezone));
+    await prisma.attendanceSettings.update({
+      where: { companyId },
+      data: current,
+    });
+    res.json({ settings: config, effectiveFrom });
   }),
 );
 attendanceRouter.get(
@@ -104,12 +138,26 @@ attendanceRouter.get(
   route(async (req, res) => {
     const companyId = companyScope(req, res);
     if (!companyId) return;
+    const settings = await settingsFor(companyId);
+    const employees = await prisma.employee.findMany({
+      where: { companyId },
+      orderBy: [{ name: "asc" }, { pin: "asc" }],
+      include: {
+        assignments: {
+          where: { effectiveFrom: { lte: localDate(settings.timezone) } },
+          orderBy: { effectiveFrom: "desc" },
+          take: 1,
+        },
+      },
+    });
     res.json({
-      employees: await prisma.employee.findMany({
-        where: { companyId },
-        orderBy: [{ name: "asc" }, { pin: "asc" }],
-        select: { id: true, name: true, pin: true, shift: true, active: true },
-      }),
+      employees: employees.map((e) => ({
+        id: e.id,
+        name: e.name,
+        pin: e.pin,
+        shift: e.assignments[0]?.shift ?? e.shift,
+        active: e.assignments[0]?.active ?? e.active,
+      })),
     });
   }),
 );
@@ -122,6 +170,7 @@ attendanceRouter.patch(
       .object({
         shift: z.union([z.literal(1), z.literal(2)]).optional(),
         active: z.boolean().optional(),
+        effectiveFrom: dateSchema.optional(),
       })
       .strict()
       .safeParse(req.body);
@@ -131,14 +180,63 @@ attendanceRouter.patch(
         .json({ error: "Choose shift 1 or 2 and a valid active status" });
       return;
     }
-    const result = await prisma.employee.updateMany({
+    const employee = await prisma.employee.findFirst({
       where: { id: req.params.id, companyId },
-      data: parsed.data,
     });
-    if (!result.count) {
+    if (!employee) {
       res.status(404).json({ error: "Employee not found" });
       return;
     }
+    const settings = await settingsFor(companyId);
+    const effectiveFrom =
+      parsed.data.effectiveFrom ?? localDate(settings.timezone);
+    await prisma.$transaction(async (tx) => {
+      await tx.employeeAssignment.upsert({
+        where: {
+          employeeId_effectiveFrom: {
+            employeeId: employee.id,
+            effectiveFrom: "0001-01-01",
+          },
+        },
+        create: {
+          employeeId: employee.id,
+          effectiveFrom: "0001-01-01",
+          shift: employee.shift,
+          active: employee.active,
+        },
+        update: {},
+      });
+      const previous = await tx.employeeAssignment.findFirst({
+        where: {
+          employeeId: employee.id,
+          effectiveFrom: { lte: effectiveFrom },
+        },
+        orderBy: { effectiveFrom: "desc" },
+      });
+      const data = {
+        shift: parsed.data.shift ?? previous?.shift ?? employee.shift,
+        active: parsed.data.active ?? previous?.active ?? employee.active,
+      };
+      await tx.employeeAssignment.upsert({
+        where: {
+          employeeId_effectiveFrom: { employeeId: employee.id, effectiveFrom },
+        },
+        create: { employeeId: employee.id, effectiveFrom, ...data },
+        update: data,
+      });
+      const current = await tx.employeeAssignment.findFirst({
+        where: {
+          employeeId: employee.id,
+          effectiveFrom: { lte: localDate(settings.timezone) },
+        },
+        orderBy: { effectiveFrom: "desc" },
+      });
+      if (current)
+        await tx.employee.update({
+          where: { id: employee.id },
+          data: { shift: current.shift, active: current.active },
+        });
+    });
     res.json({ ok: true });
   }),
 );
@@ -147,133 +245,161 @@ attendanceRouter.get(
   route(async (req, res) => {
     const companyId = companyScope(req, res);
     if (!companyId) return;
-    const company = await prisma.company.findUnique({
-      where: { id: companyId },
-    });
-    if (!company) {
+    if (!(await prisma.company.findUnique({ where: { id: companyId } }))) {
       res.status(404).json({ error: "Company not found" });
       return;
     }
     const settings = await settingsFor(companyId);
-    const now = new Date();
     const date =
       typeof req.query.date === "string"
         ? req.query.date
-        : zonedWallClockNow(settings.timezone, now).toISOString().slice(0, 10);
-    if (
-      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
-      !Number.isFinite(Date.parse(date)) ||
-      new Date(date).toISOString().slice(0, 10) !== date
-    ) {
+        : localDate(settings.timezone);
+    if (!validDate(date)) {
       res.status(400).json({ error: "Choose a valid date" });
       return;
     }
-    const windows = [
-      shiftWindow(date, 1, settings),
-      shiftWindow(date, 2, settings),
-    ];
-    const from = new Date(Math.min(...windows.map((w) => w.from.getTime())));
-    const to = new Date(Math.max(...windows.map((w) => w.to.getTime())));
-    const [employees, records, platform] = await Promise.all([
-      prisma.employee.findMany({
-        where: { companyId, active: true },
-        orderBy: [{ name: "asc" }, { pin: "asc" }],
-      }),
-      prisma.punchRecord.findMany({
-        where: {
-          device: { companyId },
-          OR: [
-            { punchTimeUtc: { gte: from, lt: to } },
-            {
-              punchTimeUtc: null,
-              punchTime: {
-                gte: new Date(from.getTime() - 86400000),
-                lt: new Date(to.getTime() + 86400000),
-              },
-            },
-          ],
-        },
-        select: {
-          id: true,
-          devicePin: true,
-          punchTime: true,
-          punchTimeUtc: true,
-          status: true,
-          device: {
-            select: { label: true, serialNumber: true, timezone: true },
-          },
-        },
-      }),
-      getOrCreatePlatformSettings(prisma),
-    ]);
-    const grouped = new Map<
-      string,
-      { id: string; time: Date; device: string; status: number }[]
-    >();
-    for (const p of records) {
-      const list = grouped.get(p.devicePin) ?? [];
-      list.push({
-        id: p.id,
-        time:
-          p.punchTimeUtc ?? zonedWallClockToUtc(p.punchTime, p.device.timezone),
-        device: p.device.label ?? p.device.serialNumber,
-        status: p.status,
-      });
-      grouped.set(p.devicePin, list);
-    }
-    const cutoff = now.getTime() - platform.dataRetentionDays * 86400000;
-    const rows = employees.map((e) => {
-      const window = windows[e.shift - 1];
-      const punches = (grouped.get(e.pin) ?? [])
-        .filter((p) => p.time >= window.from && p.time < window.to)
-        .sort((a, b) => a.time.getTime() - b.time.getTime());
-      const unavailable =
-        window.from.getTime() < cutoff ||
-        date <
-          zonedWallClockNow(settings.timezone, e.createdAt)
-            .toISOString()
-            .slice(0, 10);
-      return {
-        employeeId: e.id,
-        name: e.name,
-        pin: e.pin,
-        shift: e.shift,
-        ...summarizeDay(
-          punches.map((p) => p.time),
-          window,
-          settings.graceMinutes,
-          now,
-          unavailable,
-        ),
-        shiftStart: window.start.toISOString(),
-        shiftEnd: window.end.toISOString(),
-        punches: punches.map((p) => ({ ...p, time: p.time.toISOString() })),
-      };
-    });
-    const knownPins = new Set(employees.map((e) => e.pin));
-    const unknownPins = [
-      ...new Set(
-        records
-          .filter((p) => !knownPins.has(p.devicePin))
-          .map((p) => p.devicePin),
-      ),
-    ];
-    const summary = {
+    const report = await attendanceRows(companyId, [date]);
+    const rows = report.rows.filter((r) => r.status !== "inactive");
+    const summary: Record<string, number> = {
       total: rows.length,
       present: 0,
       absent: 0,
       pending: 0,
       unavailable: 0,
+      off: 0,
+      leave: 0,
     };
-    for (const row of rows)
-      summary[row.status as "present" | "absent" | "pending" | "unavailable"]++;
+    for (const r of rows) summary[r.status]++;
+    res.json({ ...report, date, rows, summary });
+  }),
+);
+
+attendanceRouter.get(
+  "/monthly",
+  route(async (req, res) => {
+    const companyId = companyScope(req, res);
+    if (!companyId) return;
+    if (!(await prisma.company.findUnique({ where: { id: companyId } }))) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+    const settings = await settingsFor(companyId);
+    const month =
+      typeof req.query.month === "string"
+        ? req.query.month
+        : localDate(settings.timezone).slice(0, 7);
+    if (!/^(20[0-9]{2})-(0[1-9]|1[0-2])$/.test(month)) {
+      res.status(400).json({ error: "Choose a month between 2000 and 2099" });
+      return;
+    }
+    const count = new Date(
+      Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0),
+    ).getUTCDate();
+    const dates = Array.from(
+      { length: count },
+      (_, i) => month + "-" + String(i + 1).padStart(2, "0"),
+    );
+    const employeeId =
+      typeof req.query.employeeId === "string"
+        ? req.query.employeeId
+        : undefined;
+    const report = await attendanceRows(companyId, dates, employeeId);
+    if (employeeId && !report.rows.length) {
+      res.status(404).json({ error: "Employee not found" });
+      return;
+    }
+    const groups = new Map<string, typeof report.rows>();
+    for (const r of report.rows) {
+      const days = groups.get(r.employeeId) ?? [];
+      days.push(r);
+      groups.set(r.employeeId, days);
+    }
+    const employees = [...groups.values()]
+      .filter((days) => days.some((d) => d.status !== "inactive"))
+      .map((days) => ({
+        employeeId: days[0].employeeId,
+        name: days[0].name,
+        pin: days[0].pin,
+        totals: summarizeMonth(days),
+        ...(employeeId || req.query.includeDetails === "true" ? { days } : {}),
+      }));
+    const completed = report.rows.every(
+      (r) => r.finalized || r.status === "inactive",
+    );
     res.json({
-      date,
-      timezone: settings.timezone,
-      rows,
-      summary,
-      unknownPins,
-      retentionDays: platform.dataRetentionDays,
+      month,
+      timezone: report.timezone,
+      employees,
+      retentionDays: report.retentionDays,
+      reportStatus: !completed
+        ? "In progress"
+        : report.rows.some((r) => r.status === "unavailable")
+          ? "Partial data"
+          : "Complete",
+      archived: true,
     });
+  }),
+);
+
+attendanceRouter.patch(
+  "/employees/:id/duty",
+  route(async (req, res) => {
+    const companyId = companyScope(req, res);
+    if (!companyId) return;
+    const employee = await prisma.employee.findFirst({
+      where: { id: req.params.id, companyId },
+    });
+    if (!employee) {
+      res.status(404).json({ error: "Employee not found" });
+      return;
+    }
+    const parsed = z
+      .object({
+        date: dateSchema,
+        kind: z.enum(["DEFAULT", "SHIFT1", "SHIFT2", "DOUBLE", "OFF", "LEAVE"]),
+        note: z.string().trim().max(500).default(""),
+        approvedOvertimeMinutes: z
+          .number()
+          .int()
+          .min(0)
+          .max(1440)
+          .nullable()
+          .default(null),
+      })
+      .strict()
+      .safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Choose a date, duty and overtime minutes between 0 and 1440",
+      });
+      return;
+    }
+    const { date, kind: requested, ...data } = parsed.data;
+    if (
+      requested === "DEFAULT" &&
+      !data.note &&
+      data.approvedOvertimeMinutes === null
+    ) {
+      await prisma.employeeDuty.deleteMany({
+        where: { employeeId: employee.id, date },
+      });
+    } else {
+      const assignment = await prisma.employeeAssignment.findFirst({
+        where: { employeeId: employee.id, effectiveFrom: { lte: date } },
+        orderBy: { effectiveFrom: "desc" },
+      });
+      const kind =
+        requested === "DEFAULT"
+          ? (assignment?.shift ?? employee.shift) === 2
+            ? "SHIFT2"
+            : "SHIFT1"
+          : requested;
+      await prisma.employeeDuty.upsert({
+        where: { employeeId_date: { employeeId: employee.id, date } },
+        create: { employeeId: employee.id, date, kind, ...data },
+        update: { kind, ...data },
+      });
+    }
+    res.json({ ok: true });
   }),
 );

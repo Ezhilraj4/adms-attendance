@@ -64,6 +64,7 @@ export default function Layout() {
             <NavLink to="/unregistered-devices">Unregistered Devices</NavLink>
             <NavLink to="/punch-records">Punch Records</NavLink>
             <NavLink to="/attendance">Daily Attendance</NavLink>
+            <NavLink to="/attendance-monthly">Monthly Reports</NavLink>
             <NavLink to="/employees">Employees</NavLink>
             <NavLink to="/attendance-settings">Attendance Settings</NavLink>
             <NavLink to="/failed-webhooks">Failed Webhooks</NavLink>
